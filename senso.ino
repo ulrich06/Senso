@@ -1,12 +1,18 @@
 #include <ESP8266WiFi.h>
-
 #include <WiFiClient.h>
 #include <WiFiUdp.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-
 #include "Adafruit_MCP9808.h"
+
+#define TEMP_SENSOR "TEMP_XP"
+#define VCC_SENSOR "VCC_XP"
+#define MWDB_API_HOST "192.168.25.69"
+#define MWDB_API_PORT 11000
+#define SSID "IoTLab_2"
+#define WIFI_KEY "*********"
+
 
 IPAddress timeServerIP;
 const int ntpServerNameSize = 3;
@@ -16,14 +22,14 @@ byte packetBuffer[ NTP_PACKET_SIZE];
 WiFiUDP udp;
 
 
-char* sleepPeriodHost = "192.168.25.69";
-char* sleepPeriodUrl = "/sensors/AC_443/sleep";
-const int sleepPort = 11000;
-char* collectorHost = "192.168.25.69";
+char* sleepPeriodHost = MWDB_API_HOST;
+char* sleepPeriodUrl = "/sensors/sleep";
+const int sleepPort = MWDB_API_PORT;
+char* collectorHost = MWDB_API_HOST;
 char* collectorUrl = "/collect";
-const int collectorPort = 11000;
-char ssid[] = "IoTLab_2";
-char pass[] = "*********";
+const int collectorPort = MWDB_API_PORT;
+char ssid[] = SSID;
+char pass[] = WIFI_KEY;
 
 unsigned long initTimestamp = 0L;
 unsigned int localPort = 2390;
@@ -35,7 +41,6 @@ Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
 
 ADC_MODE(ADC_VCC);
 
-float t = 0;
 int vcc;
 
 
@@ -79,18 +84,16 @@ void loop(void)
 {
     
     vcc = ESP.getVcc();    
-   
-    t = tempsensor.readTempC();
-    delay(10);
-    sendData("TEMP_XP", t);
-    sendData("VCC_XP", float(vcc));
+    tempsensor.shutdown_wake(0);
+    float t = tempsensor.readTempC();
+    sendData(TEMP_SENSOR, t);
+    delay(250);
+    tempsensor.shutdown_wake(1);
+    sendData(VCC_SENSOR, float(vcc));
     int sleep = readNextSleepingPeriod();
     Serial.println("Going to sleep");
-    tempsensor.shutdown_wake(1);
     ESP.deepSleep(sleep * 1000 * 1000);
-    tempsensor.shutdown_wake(0);
-    
-    delay(1000);
+    // ESP reset here - ie. any code bellow this line won't be executed
 }
 
 
