@@ -23,7 +23,7 @@ WiFiUDP udp;
 
 
 char* sleepPeriodHost = MWDB_API_HOST;
-char* sleepPeriodUrl = "/sensors/sleep";
+char* sleepPeriodUrl = "/sensors/" TEMP_SENSOR "/sleep";
 const int sleepPort = MWDB_API_PORT;
 char* collectorHost = MWDB_API_HOST;
 char* collectorUrl = "/collect";
