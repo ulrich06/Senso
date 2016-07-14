@@ -4,14 +4,18 @@
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-#include "Adafruit_MCP9808.h"
 
+#include "Adafruit_MCP9808.h"
 #define TEMP_SENSOR "TEMP_XP"
 #define VCC_SENSOR "VCC_XP"
 #define MWDB_API_HOST "192.168.25.69"
 #define MWDB_API_PORT 11000
 #define SSID "IoTLab_2"
 #define WIFI_KEY "*********"
+
+
+#define MAX_BUFFER 10
+#include "senso_eeprom.h"
 
 
 IPAddress timeServerIP;
@@ -50,7 +54,8 @@ void setup(void)
     Serial.begin(115200);
     Serial.println();
     Serial.println();
-    
+    EEPROM.begin(EEPROM_SIZE);
+    delay(200);
     Serial.print("Connecting to ");
     Serial.println(ssid);
     WiFi.begin(ssid, pass);
@@ -90,8 +95,18 @@ void loop(void)
     delay(250);
     tempsensor.shutdown_wake(1);
     sendData(VCC_SENSOR, float(vcc));
-    int sleep = readNextSleepingPeriod();
-    Serial.println("Going to sleep");
+    int sleep = 0;
+    int tries = 1;
+    while (sleep == 0 && tries <= 5){
+      sleep = readNextSleepingPeriod();
+      tries += 1;
+    }
+
+    if (sleep == 0) sleep = DEFAULT_SLEEP;
+    
+    Serial.print("Going to sleep for ");
+    Serial.print(sleep);
+    Serial.println(" seconds");
     ESP.deepSleep(sleep * 1000 * 1000);
     // ESP reset here - ie. any code bellow this line won't be executed
 }
@@ -182,7 +197,7 @@ int readNextSleepingPeriod(){
 String getPeriod(String chain){
   int j = chain.length() - 1;
   while (chain[j] != '=' && j >=0 ){ j -= 1;}
-  return chain.substring(j + 1, chain.length() - 1);
+  return chain.substring(j + 1, chain.length());
 }
 
 unsigned long sendNTPpacket(IPAddress& address)
