@@ -6,14 +6,14 @@
 #include <WiFiManager.h>
 
 #include "Adafruit_MCP9808.h"
-#define TEMP_SENSOR "TEMP_XP"
+#define TEMP_SENSOR "TEMP_CAMPUS"
 #define VCC_SENSOR "VCC_XP"
-#define MWDB_API_HOST "192.168.25.69"
+#define MWDB_API_HOST "169.254.62.145"
 #define MWDB_API_PORT 11000
-#define SSID "IoTLab_2"
-#define WIFI_KEY "*********"
+#define SSID "********"
+#define WIFI_KEY "********"
 #define DEFAULT_SLEEP 300
-
+#define DEFAULT_SENDING 300
 
 #define MAX_BUFFER 10
 #include "senso_eeprom.h"
@@ -29,6 +29,8 @@ WiFiUDP udp;
 
 char* sleepPeriodHost = MWDB_API_HOST;
 char* sleepPeriodUrl = "/sensors/" TEMP_SENSOR "/sleep";
+char* sendingPeriodHost = MWDB_API_HOST;
+char* sendingPeriodUrl = "/sensors/" TEMP_SENSOR "/sending";
 const int sleepPort = MWDB_API_PORT;
 char* collectorHost = MWDB_API_HOST;
 char* collectorUrl = "/collect";
@@ -63,7 +65,7 @@ void setup(void)
     
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        Serial.print(".");
+        Serial.print("#");
     }
     Serial.println("");
     
@@ -95,15 +97,16 @@ void loop(void)
     sendData(TEMP_SENSOR, t);
     delay(250);
     tempsensor.shutdown_wake(1);
-    sendData(VCC_SENSOR, float(vcc));
+    //sendData(VCC_SENSOR, float(vcc));
     int sleep = 0;
     int tries = 1;
     while (sleep == 0 && tries <= 5){
-      sleep = readNextSleepingPeriod();
+      sleep = readPeriod(sleepPeriodHost, sleepPeriodUrl);
       tries += 1;
     }
 
     if (sleep == 0) sleep = DEFAULT_SLEEP;
+
     
     Serial.print("Going to sleep for ");
     Serial.print(sleep);
@@ -155,23 +158,53 @@ String parseData(String name, float value) {
 }
 
 void sendData(String name, float value){
-    WiFiClient sendingClient;
-    
-    Serial.println("Send data");
-    String data = parseData(name, value);
-    if (sendingClient.connect(collectorHost, collectorPort)){
-        Serial.println("Connected");
-        sendingClient.print(String("POST ") + collectorUrl + " HTTP/1.1\r\n" +
-        "Host: " + collectorHost + "\r\n" +
-        "Content-Type: application/json" + "\r\n" +
-        "Content-Length: " + data.length() + "\r\n" +
-        "\r\n" +
-        data);
+    if (getSync() < initTimestamp) {
+      Serial.println("Time to sync!");
+      // We are over the planned sync time
+      // Send the data
+      WiFiClient sendingClient;
+      Serial.println("Send data");
+      String data = parseData(name, value);
+      if (sendingClient.connect(collectorHost, collectorPort)){
+          Serial.println("Connected");
+          sendingClient.print(String("POST ") + collectorUrl + " HTTP/1.1\r\n" +
+          "Host: " + collectorHost + "\r\n" +
+          "Content-Type: application/json" + "\r\n" +
+          "Content-Length: " + data.length() + "\r\n" +
+          "\r\n" +
+          data);
+      }
+      // Get next sync time
+      int tries = 0;
+      int sending = 0;
+      while (sending == 0 && tries <= 5) {
+        sending = readPeriod(sendingPeriodHost, sendingPeriodUrl);
+        tries += 1; 
+      }
+      if (sending == 0) sending = DEFAULT_SENDING;
+       long nextSending = initTimestamp + sending;
+      // Store in EEPROM next sync time
+      Serial.print("Next sending time: ");
+      Serial.println(nextSending);
+      setSync(nextSending);
+    } else {
+      Serial.println("To early to sync!");
+      // If buffer is not full => bufferize data
+      if (!isBufferFull()){
+        Serial.println("Bufferize data");
+        int id;
+        if (name.equals(TEMP_SENSOR)) id = 1; else id = 0;
+        addData(id, value, initTimestamp);
+        print_eeprom();
+      } else {
+        Serial.println("Buffer full :( Sync anyway");  
+      // else send anyway the buffer and flush it
+      }
     }
 }
 
 
-int readNextSleepingPeriod(){
+int readPeriod(char * host, char * url){
     WiFiClient configClient;
     const int httpPort = 11000;
     if (!configClient.connect(sleepPeriodHost, httpPort)){
@@ -179,8 +212,8 @@ int readNextSleepingPeriod(){
         return 0;
     }
     
-    configClient.print(String("GET ") + sleepPeriodUrl + " HTTP/1.1\r\n" +
-    "Host: " + sleepPeriodHost + "\r\n" +
+    configClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+    "Host: " + host + "\r\n" +
     "Connection: close\r\n\r\n");
     delay(10);
     
