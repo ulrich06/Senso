@@ -12,6 +12,7 @@
 #define MWDB_API_PORT 11000
 #define SSID "IoTLab_2"
 #define WIFI_KEY "*********"
+#define DEFAULT_SLEEP 300
 
 
 #define MAX_BUFFER 10
