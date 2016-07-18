@@ -115,10 +115,11 @@ void loop(void)
 
     if (sleep == 0) sleep = DEFAULT_SLEEP;
 
-    
+    long nextWakeup = initTimestamp + sleep;
     Serial.print("Going to sleep for ");
     Serial.print(sleep);
-    Serial.println(" seconds");
+    Serial.print(" seconds. Next wake up at: ");
+    Serial.println(nextWakeup);
     ESP.deepSleep(sleep * 1000 * 1000);
     // ESP reset here - ie. any code bellow this line won't be executed
 }
