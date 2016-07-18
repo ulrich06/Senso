@@ -65,6 +65,9 @@ void setup(void)
     Serial.println();
     EEPROM.begin(EEPROM_SIZE);
     delay(200);
+    String reason = ESP.getResetReason();
+    Serial.print("Reboot caused by: "); Serial.println(reason);
+    Serial.println();
     Serial.print("Connecting to ");
     Serial.println(ssid);
     WiFi.begin(ssid, pass);
