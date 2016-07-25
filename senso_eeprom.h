@@ -2,12 +2,12 @@
 #define EEPROM_SIZE 512
 
 const int ADD_BUFFER = 0;
-const int ADD_TIMESTAMP = ADD_BUFFER + sizeof(long);
-const int ADD_SYNC = ADD_TIMESTAMP + sizeof(int);
-const int ADD_NX_SYNC = ADD_SYNC + sizeof(long);
-const int ADD_SAMPLING = ADD_NX_SYNC + sizeof(int);
-const int ADD_NX_SAMPLING = ADD_SAMPLING + sizeof(long);
-const int ADD_BEGIN_DATA = ADD_NX_SAMPLING + sizeof(int);
+const int ADD_TIMESTAMP = ADD_BUFFER + sizeof(int);
+const int ADD_SYNC = ADD_TIMESTAMP + sizeof(long);
+const int ADD_NX_SYNC = ADD_SYNC + sizeof(int);
+const int ADD_SAMPLING = ADD_NX_SYNC + sizeof(long);
+const int ADD_NX_SAMPLING = ADD_SAMPLING + sizeof(int);
+const int ADD_BEGIN_DATA = ADD_NX_SAMPLING + sizeof(long);
 const int SIZE_UNIT_DATA = sizeof(int) + sizeof(float) + sizeof(long);
 
 void reset();
