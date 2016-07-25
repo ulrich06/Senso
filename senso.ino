@@ -4,11 +4,13 @@
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 #include "Adafruit_MCP9808.h"
 #define TEMP_SENSOR "TEMP_REAL"
 #define VCC_SENSOR "VCC_REAL"
-#define MWDB_API_HOST "192.168.25.69"
+#define MWDB_API_HOST "192.168.25.63"
 #define MWDB_API_PORT 11000
 #define SSID "*****"
 #define WIFI_KEY "******"
@@ -22,7 +24,7 @@ typedef struct Smartcampus
   long t;
 } Smartcampus;
 
-#define MAX_BUFFER 10
+#define MAX_BUFFER 40
 #include "senso_eeprom.h"
 
 IPAddress timeServerIP;
@@ -49,8 +51,6 @@ unsigned int localPort = 2390;
 
 unsigned long forecastSampling = 0L;
 unsigned long forecastSending = 0L;
-unsigned long nextSampling = 0L;
-unsigned long nextSending = 0L;
 
 WiFiClient wifiClient;
 WiFiClient remoteClient;
@@ -58,56 +58,33 @@ Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
 
 ADC_MODE(ADC_VCC);
 
-int vcc;
 
 
 
 void setup(void)
 {
+  EEPROM.begin(EEPROM_SIZE);
   Serial.begin(115200);
   Serial.println();
-  Serial.println();
-  EEPROM.begin(EEPROM_SIZE);
   delay(200);
   String reason = ESP.getResetReason();
   Serial.print("Reboot caused by: "); Serial.println(reason);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, pass);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print("#");
-  }
-  Serial.println("");
-  
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  
-  
-  
-  Serial.println("Starting UDP");
-  udp.begin(localPort);
-  Serial.print("Local port: ");
-  Serial.println(udp.localPort());
-  initTimestamp = getInitTimestamp();
+  initTimestamp = retrieveTimestamp();
   if (initTimestamp == 0L) ESP.reset();
   Serial.print("Boot time: ");
   Serial.println(initTimestamp);
-  
+
   Serial.print("[Forecast] sampling: ");
-  forecastSampling = getSampling();
+  forecastSampling = getNxSampling();
   Serial.println(forecastSampling);
-  
+
   Serial.print("[Forecast] sending: ");
-  forecastSending = getSync();
+  forecastSending = getNxSync();
   Serial.println(forecastSending);
-  
+
   Serial.print("Actual buffer size: ");
   Serial.println(getBufferSize());
-  
+
   tempsensor.begin();
   Serial.println("Init done......");
 }
@@ -115,33 +92,27 @@ void setup(void)
 
 void loop(void)
 {
-  
+  int sleep = 0;
+  int sending = 0;
+  unsigned long nextSampling = 0L;
+  unsigned long nextSending = 0L;
+
   if (forecastSampling <= initTimestamp){
     Serial.println("Time to sample");
-    vcc = ESP.getVcc();
+    float vcc = ESP.getVcc();
     tempsensor.shutdown_wake(0);
     float t = tempsensor.readTempC();
+    Serial.print("Mesured TEMP= "); Serial.println(t);
+    Serial.print("Mesured VCC= "); Serial.println(vcc);
     sendData(TEMP_SENSOR, t);
+    sendData(VCC_SENSOR, vcc);
+
     delay(250);
     tempsensor.shutdown_wake(1);
-    sendData(VCC_SENSOR, float(vcc));
-    
-    int sleep = 0;
-    int tries = 1;
-    while (sleep == 0 && tries <= MAX_RETRIES){
-      sleep = readPeriod(sleepPeriodHost, sleepPeriodUrl);
-      
-      tries += 1;
-    }
-    
-    if (sleep == 0) sleep = DEFAULT_SLEEP;
-    Serial.print("Adaptive sampling: "); Serial.println(sleep);
-    nextSampling = initTimestamp + sleep;
-    setSampling(nextSampling);
-    
-  } else {
-    nextSampling = forecastSampling;
   }
+
+    
+
   if (forecastSending <= initTimestamp) {
     Serial.println("Time to send");
     sendBuffer();
@@ -149,55 +120,110 @@ void loop(void)
     delay(100);
     // Get next sync time
     int tries = 0;
-    int sending = 0;
     while (sending == 0 && tries <= MAX_RETRIES) {
       sending = readPeriod(sendingPeriodHost, sendingPeriodUrl);
       tries += 1;
     }
-    if (sending == 0) sending = DEFAULT_SENDING;
+    if (sending == 0) { // No sending received
+      Serial.println("DEFAULT SLEEP USED!");
+      sending = DEFAULT_SENDING;
+    }
     Serial.print("Adaptive sending: "); Serial.println(sending);
-    
+
+    tries = 0;
+    while (sleep == 0 && tries <= MAX_RETRIES) {
+      sleep = readPeriod(sleepPeriodHost, sleepPeriodUrl);
+      tries += 1;
+    }
+    if (sleep == 0) { // No sleep received
+      Serial.println("DEFAULT SLEEP USED!");
+      sleep = DEFAULT_SLEEP;
+    }
+    Serial.print("Adaptive sleep: "); Serial.println(sleep);
+
+    // Update the sampling/sending times
+    nextSampling = initTimestamp + sleep;
     nextSending = initTimestamp + sending;
     // Store in EEPROM next sync time
-    setSync(nextSending);
-  } else {
-    nextSending = forecastSending;
-  }
-  
-  
+    setNxSync(nextSending);
+    setSync(sending);
+
+    // Store in EEPROM next sleep time
+    setNxSampling(nextSampling);
+    setSampling(sleep);
+  } 
+
+
   delay(500);
-  
-  
-  
-  
+
   /************************************/
-  Serial.print("Next sampling: "); Serial.println(nextSampling);
-  Serial.print("Next sending: "); Serial.println(nextSending);
-  
+
+    
+
+  Serial.print("Next sampling: "); Serial.println(getNxSampling());
+  Serial.print("Next sending: "); Serial.println(getNxSync());
+
   int minValue = -1;
   // If sending is before sampling but empty buffer => wait for sampling
-  if (nextSending < nextSampling && isBufferEmpty()){
-    minValue = nextSampling;
+  if (getSync() < getSampling() && isBufferEmpty()){ //Useless to reboot on sampling trigger if buffer is empty
+    minValue = getSampling();
+    setTimestamp(getNxSampling());
   } else {
-    minValue = MIN(nextSampling, nextSending);
+    minValue = MIN(getSampling(), getSync()); //Minimum period between sampling or sync
+    setTimestamp(initTimestamp + minValue);
   }
-  
-  int timeToSleep = minValue - initTimestamp;
-  
+
   Serial.print("Going to sleep for ");
-  Serial.print(timeToSleep);
+  Serial.print(minValue);
   Serial.print(" seconds. Next wake up at: ");
-  int nextWake = initTimestamp + timeToSleep;
+  int nextWake = getTimestamp();
   Serial.println(nextWake);
-  
-  
-  ESP.deepSleep(timeToSleep * 1000 * 1000);
+
+
+  ESP.deepSleep(minValue * 1000 * 1000);
   // ESP reset here - ie. any code bellow this line won't be executed
 }
 
 
+void connectWifi(){
+  Serial.println("[Achtung!] Energy loose (wifi connection)");
+  if (WiFi.status() != WL_CONNECTED){
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+    WiFi.begin(ssid, pass);
 
-unsigned long getInitTimestamp(){
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print("#");
+    }
+    Serial.println("");
+
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+  }
+}
+
+unsigned long retrieveTimestamp(){
+  long t = getTimestamp();
+  if (t == 0L){
+    int tries = 0;
+    while (t == 0L && tries < MAX_RETRIES){
+      Serial.println("No timestamp found... call ntp server");
+      t = getTimestampFromNTP();
+      tries += 1;
+    }
+  }
+  if (t == 0L){
+    Serial.println("Fatal error x_x .... Reboot");
+    ESP.reset();
+  }
+  return t;
+}
+
+unsigned long getTimestampFromNTP(){
+  connectWifi();
+  udp.begin(localPort);
   unsigned long epoch;
   for (int index = 0; index < ntpServerNameSize; index++){
     Serial.print("Connecting on: "); Serial.println(String(ntpServerName[index]));
@@ -205,7 +231,7 @@ unsigned long getInitTimestamp(){
     sendNTPpacket(timeServerIP);
     delay(3000);
     int cb = udp.parsePacket();
-    
+
     if (cb > 0){
       udp.read(packetBuffer, NTP_PACKET_SIZE);
       unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
@@ -216,14 +242,11 @@ unsigned long getInitTimestamp(){
       break;
     }
   }
-  
+
   return epoch;
-  
+
 }
 
-unsigned long getTimestamp(){
-  return initTimestamp;
-}
 
 String resolve(int id){
   if (id == 0) return VCC_SENSOR; else return TEMP_SENSOR;
@@ -236,10 +259,10 @@ String parseData(int name, float value, long time) {
   String jsonData;
   String valueAsString = String(value);
   String timestampAsString = String(time);
-  
+
   jsonData = "\{\"n\":\""+ resName +"\", \"v\":\"" + valueAsString + "\", \"t\":\"" + timestampAsString + "\"\}";
   jsonData.replace("\n", "");
-  
+
   return jsonData;
 }
 
@@ -248,7 +271,7 @@ void sendBuffer(){
   Smartcampus * data;
   data = (Smartcampus *) calloc(getBufferSize(), sizeof(Smartcampus));
   memcpy(data, getBuffer(), getBufferSize() * sizeof(Smartcampus));
-  
+
   for (int i = 0; i < getBufferSize(); i ++){
     WiFiClient sendingClient;
     //String data = parseData(data[i].n, data[i].v, data[i].t);
@@ -262,13 +285,14 @@ void sendBuffer(){
       "Content-Length: " + data.length() + "\r\n" +
       "\r\n" +
       data);
+      sendingClient.stop();
     }
-    
+
   }
 }
 
 void sendData(String name, float value){
-  
+
   // If buffer is not full => bufferize data
   if (!isBufferFull()){
     Serial.println("Bufferize data");
@@ -277,9 +301,7 @@ void sendData(String name, float value){
     addData(id, value, initTimestamp);
     print_eeprom();
   } else {
-    Serial.println("Buffer full :( Sync anyway");
-    sendBuffer();
-    flushBuffer();
+    Serial.println("Buffer full :(");
     delay(100);
     return;
   }
@@ -287,26 +309,27 @@ void sendData(String name, float value){
 
 
 int readPeriod(char * host, char * url){
+  connectWifi();
   WiFiClient configClient;
   const int httpPort = 11000;
-  if (!configClient.connect(sleepPeriodHost, httpPort)){
+  if (!configClient.connect(MWDB_API_HOST, httpPort)){
     Serial.println("connection failed");
     return 0;
   }
-  
+
   configClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
   "Host: " + host + "\r\n" +
   "Connection: close\r\n\r\n");
   delay(100);
-  
-  
+
+
   String line;
   while (configClient.available()) {
     line = configClient.readStringUntil('\r');
   }
   configClient.stop();
   String period = getPeriod(line);
-  
+
   return period.toInt();
 }
 
@@ -328,7 +351,7 @@ unsigned long sendNTPpacket(IPAddress& address)
   packetBuffer[13]  = 0x4E;
   packetBuffer[14]  = 49;
   packetBuffer[15]  = 52;
-  
+
   udp.beginPacket(address, 123);
   udp.write(packetBuffer, NTP_PACKET_SIZE);
   udp.endPacket();
