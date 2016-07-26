@@ -109,7 +109,11 @@ void loop(void)
 
     delay(250);
     tempsensor.shutdown_wake(1);
-  }
+    sleep = getSampling();
+    nextSampling = initTimestamp + sleep;
+    setNxSampling(nextSampling);
+  } 
+
 
     
 
@@ -140,7 +144,7 @@ void loop(void)
       sleep = DEFAULT_SLEEP;
     }
     Serial.print("Adaptive sleep: "); Serial.println(sleep);
-
+    initTimestamp = getTimestampFromNTP(); // Resynchronization
     // Update the sampling/sending times
     nextSampling = initTimestamp + sleep;
     nextSending = initTimestamp + sending;
@@ -151,9 +155,7 @@ void loop(void)
     // Store in EEPROM next sleep time
     setNxSampling(nextSampling);
     setSampling(sleep);
-  } 
-
-
+  }
   delay(500);
 
   /************************************/
@@ -277,7 +279,7 @@ void sendBuffer(){
     //String data = parseData(data[i].n, data[i].v, data[i].t);
     int n = data[i].n; float v = data[i].v; long t = data[i].t;
     String data = parseData(n, v, t);
-    if (sendingClient.connect(collectorHost, collectorPort)){
+    if (v != 0 && sendingClient.connect(collectorHost, collectorPort)){
       Serial.println("Sending value...");
       sendingClient.print(String("POST ") + collectorUrl + " HTTP/1.1\r\n" +
       "Host: " + collectorHost + "\r\n" +
@@ -298,7 +300,8 @@ void sendData(String name, float value){
     Serial.println("Bufferize data");
     int id;
     if (name.equals(TEMP_SENSOR)) id = 1; else id = 0;
-    addData(id, value, initTimestamp);
+    if (id != 0 || value != 0)
+      addData(id, value, initTimestamp);
     print_eeprom();
   } else {
     Serial.println("Buffer full :(");
