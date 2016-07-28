@@ -146,9 +146,9 @@ Smartcampus * getBuffer(){
      EEPROM.get(i,  id);
      EEPROM.get(i + sizeof(int), v);
      EEPROM.get(i + sizeof(int) + sizeof(float), t);
-     dataArray[i/SIZE_UNIT_DATA - 1].n = id;
-     dataArray[i/SIZE_UNIT_DATA - 1].v = v;
-     dataArray[i/SIZE_UNIT_DATA - 1].t = t;
+     dataArray[i/SIZE_UNIT_DATA - 2].n = id;
+     dataArray[i/SIZE_UNIT_DATA - 2].v = v;
+     dataArray[i/SIZE_UNIT_DATA - 2].t = t;
   }
   return dataArray;
 }
