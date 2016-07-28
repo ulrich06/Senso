@@ -28,12 +28,12 @@ void reset() {
   for (int i = 0; i < EEPROM_SIZE; i ++){
     EEPROM.write(i, 0xFF);
   }
-  setBufferSize(0);
+  setTimestamp(0L);
   setSync(0);
+  setNxSync(0L);
   setSampling(0);
-  setNxSampling(0);
-  setNxSync(0);
-  setTimestamp(0);
+  setNxSync(0L);
+  setBufferSize(0);
 }
 
 void flushBuffer() {
