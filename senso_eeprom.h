@@ -20,6 +20,7 @@ void setNxSampling(long);
 void setNxSync(long);
 void setTimestamp(long);
 
+
 int pointerData() {
   return ADD_BEGIN_DATA + getBufferSize() * SIZE_UNIT_DATA;
 }

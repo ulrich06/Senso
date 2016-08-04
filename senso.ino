@@ -66,32 +66,33 @@ void setup(void)
   EEPROM.begin(EEPROM_SIZE);
   Serial.begin(115200);
   Serial.println();
-  delay(200);
   String reason = ESP.getResetReason();
   Serial.print("Reboot caused by: "); Serial.println(reason);
-  initTimestamp = retrieveTimestamp();
-  if (initTimestamp == 0L) ESP.reset();
-  Serial.print("Boot time: ");
-  Serial.println(initTimestamp);
-
-  Serial.print("[Forecast] sampling: ");
-  forecastSampling = getNxSampling();
-  Serial.println(forecastSampling);
-
-  Serial.print("[Forecast] sending: ");
-  forecastSending = getNxSync();
-  Serial.println(forecastSending);
-
-  Serial.print("Actual buffer size: ");
-  Serial.println(getBufferSize());
-
   tempsensor.begin();
-  Serial.println("Init done......");
 }
 
 
 void loop(void)
 {
+
+  initTimestamp = retrieveTimestamp();
+  if (initTimestamp == 0L) ESP.reset();
+  Serial.print("Boot time: ");
+  Serial.println(initTimestamp);
+  
+  Serial.print("[Forecast] sampling: ");
+  forecastSampling = getNxSampling();
+  Serial.println(forecastSampling);
+  
+  Serial.print("[Forecast] sending: ");
+  forecastSending = getNxSync();
+  Serial.println(forecastSending);
+  
+  Serial.print("Actual buffer size: ");
+  Serial.println(getBufferSize());
+  
+  Serial.println("Init done......");
+ 
   int sleep = 0;
   int sending = 0;
   unsigned long nextSampling = 0L;
@@ -107,8 +108,6 @@ void loop(void)
     sendData(TEMP_SENSOR, t);
     sendData(VCC_SENSOR, vcc);
 
-    delay(250);
-    tempsensor.shutdown_wake(1);
     sleep = getSampling();
     nextSampling = initTimestamp + sleep;
     setNxSampling(nextSampling);
@@ -167,12 +166,17 @@ void loop(void)
 
   int minValue = -1;
   // If sending is before sampling but empty buffer => wait for sampling
-  if (getSync() < getSampling() && isBufferEmpty()){ //Useless to reboot on sampling trigger if buffer is empty
-    minValue = getSampling();
+  if (getNxSync() < getNxSampling() && isBufferEmpty()){ //Useless to reboot on sampling trigger if buffer is empty
+    minValue = getNxSampling() - initTimestamp;
     setTimestamp(getNxSampling());
   } else {
-    minValue = MIN(getSampling(), getSync()); //Minimum period between sampling or sync
-    setTimestamp(initTimestamp + minValue);
+    if (getNxSync() < getNxSampling()){
+       minValue = getNxSync() - initTimestamp;
+       setTimestamp(getNxSync());
+    } else {
+      minValue = getNxSampling() - initTimestamp;
+      setTimestamp(getNxSampling());
+    }
   }
 
   Serial.print("Going to sleep for ");
@@ -181,7 +185,7 @@ void loop(void)
   int nextWake = getTimestamp();
   Serial.println(nextWake);
 
-
+  tempsensor.shutdown_wake(1);
   ESP.deepSleep(minValue * 1000 * 1000);
   // ESP reset here - ie. any code bellow this line won't be executed
 }
@@ -231,7 +235,7 @@ unsigned long getTimestampFromNTP(){
     Serial.print("Connecting on: "); Serial.println(String(ntpServerName[index]));
     WiFi.hostByName(ntpServerName[index], timeServerIP);
     sendNTPpacket(timeServerIP);
-    delay(3000);
+    delay(1500);
     int cb = udp.parsePacket();
 
     if (cb > 0){
@@ -270,16 +274,15 @@ String parseData(int name, float value, long time) {
 
 
 void sendBuffer(){
+  connectWifi();
   Smartcampus * data;
   data = (Smartcampus *) calloc(getBufferSize(), sizeof(Smartcampus));
   memcpy(data, getBuffer(), getBufferSize() * sizeof(Smartcampus));
-
-  for (int i = 0; i < getBufferSize(); i ++){
-    WiFiClient sendingClient;
-    //String data = parseData(data[i].n, data[i].v, data[i].t);
-    int n = data[i].n; float v = data[i].v; long t = data[i].t;
-    String data = parseData(n, v, t);
-    if (v != 0 && sendingClient.connect(collectorHost, collectorPort)){
+  WiFiClient sendingClient;
+  if (sendingClient.connect(collectorHost, collectorPort)){
+    for (int i = 0; i < getBufferSize(); i ++){
+      int n = data[i].n; float v = data[i].v; long t = data[i].t;
+      String data = parseData(n, v, t);
       Serial.println("Sending value...");
       sendingClient.print(String("POST ") + collectorUrl + " HTTP/1.1\r\n" +
       "Host: " + collectorHost + "\r\n" +
@@ -287,10 +290,12 @@ void sendBuffer(){
       "Content-Length: " + data.length() + "\r\n" +
       "\r\n" +
       data);
-      sendingClient.stop();
+      delay(100);
     }
-
-  }
+    sendingClient.stop();
+    } else {
+      Serial.println("Connection failed");
+    }
 }
 
 void sendData(String name, float value){
@@ -300,13 +305,10 @@ void sendData(String name, float value){
     Serial.println("Bufferize data");
     int id;
     if (name.equals(TEMP_SENSOR)) id = 1; else id = 0;
-    if (id != 0 || value != 0)
-      addData(id, value, initTimestamp);
+    addData(id, value, initTimestamp);
     print_eeprom();
   } else {
     Serial.println("Buffer full :(");
-    delay(100);
-    return;
   }
 }
 
